@@ -75,13 +75,35 @@ void display_seven(int number) {
 		number = number/10;
 	}
 }
-// read number of HIGH switches
-int read_nr_switches() {
-	int data;
-	data = IORD_ALTERA_AVALON_PIO_DATA(SWITCHES_BASE);
-	printf("Our number %d\n", data);
-	printf("Nr of ones %d\n", count_ones(data));
-	return count_ones(data);
+
+// display number with milliseconds
+void display_seven_time(double number) {
+	int i = 0;
+	int seconds = floor(number);
+	int remaining_ms = (number - seconds)*1000;
+
+	int numlen1 = log10(seconds) + 1;
+	int numlen2 = 3;
+
+	if(seconds == 0) {
+		numlen1 = 1;
+	}
+
+	for(i=0; i<6; i++) {
+		IOWR_ALTERA_AVALON_PIO_DATA(HEX0_BASE-0x20*i, 0xff);
+	}
+
+	// write ms to display
+	for (i = 0; i < numlen2; i++){
+			IOWR_ALTERA_AVALON_PIO_DATA(HEX0_BASE-0x20*i, LUT[remaining_ms%10]);
+			remaining_ms = remaining_ms/10;
+	}
+
+	// write s to display
+	for (i = 4; i < 6 - (numlen1 == 1); i++){
+			IOWR_ALTERA_AVALON_PIO_DATA(HEX0_BASE-0x20*i, LUT[seconds%10]);
+			seconds = seconds/10;
+	}
 }
 
 // count number of 1s in the binary structure of the number
@@ -105,6 +127,17 @@ int count_ones(int nr) {
 
 	return ones;
 }
+
+// read number of HIGH switches
+int read_nr_switches() {
+	int data;
+	data = IORD_ALTERA_AVALON_PIO_DATA(SWITCHES_BASE);
+	printf("Our number %d\n", data);
+	printf("Nr of ones %d\n", count_ones(data));
+	return count_ones(data);
+}
+
+
 
 // exercises
 void ex_c1() {
@@ -156,25 +189,72 @@ void ex_c3() {
 
 void ex_c4() {
 	init_button_pio();
+	double avg_stats_sum = 0;
+	double avg_stats = 0;
+	volatile int game_started = 0;
+	int	counter = 1;
 	while(1) {
+		float my_time;
+
 		if(edge_capture == 1) {
-			int r = (rand()%10) * 10000000;      // Returns a pseudo-random integer between 0 and RAND_MAX.
+			// Returns a pseudo-random integer between 0 and RAND_MAX. // multiply by 1e6 to get the desired ms
+			int r = 1 + (rand()%read_nr_switches());
+			game_started = 1;
+
 			printf("r is %d\n", r);
-			int start = alt_timestamp_start(); // intialize the timer
-			while(alt_timestamp()/10 < r) {
-				printf("%d\n", (alt_timestamp()));
+			// intialize the timer
+			alt_timestamp_start();
+
+
+			//start the game
+//			game_started = true;
+			while((alt_timestamp()/alt_timestamp_freq()) < r) {
+				printf("%d\n", (alt_timestamp()/alt_timestamp_freq()));
 				IOWR_ALTERA_AVALON_PIO_DATA(LEDS_BASE, 0b01010101010);
 				usleep(1000000/2);
 				IOWR_ALTERA_AVALON_PIO_DATA(LEDS_BASE, 0b10101010101);
 				usleep(1000000/2);
-				printf("%d\n", (alt_timestamp()));
+				printf("%d\n", (alt_timestamp()/alt_timestamp_freq()));
 			}
 
 //			alt_timestamp(); // read the timer
 //			alt_timestamp_freq() // read the frequence of the timer
 
 			IOWR_ALTERA_AVALON_PIO_DATA(LEDS_BASE, 0xff);
-			edge_capture = 2;
+
+			// at this point, timer ended and all LEDs are ON, waiting for user to press button 4
+			// start a timer
+			alt_timestamp_start();
+
+			 edge_capture = 9; // ???
+		}
+
+		// if user presses 4, stop the timer and display
+		if((log2(edge_capture) == 3 )&& (game_started == 1)) {
+			printf("We pressed button 4");
+			// save current time into a var
+			printf("My time is: %f\n", (double)alt_timestamp()/(double)alt_timestamp_freq());
+			// if we don't have stats, don't compute the mean
+
+			if(counter > 1) {
+				avg_stats_sum += (double)alt_timestamp()/(double)alt_timestamp_freq();
+				avg_stats = avg_stats_sum / counter;
+			} else {
+				avg_stats_sum = (double)alt_timestamp()/(double)alt_timestamp_freq();
+				avg_stats = (double)alt_timestamp()/(double)alt_timestamp_freq();
+			}
+
+
+			// display the current time
+			IOWR_ALTERA_AVALON_PIO_DATA(LEDS_BASE, 0x00);
+			display_seven_time((double)alt_timestamp()/(double)alt_timestamp_freq());
+			game_started = 0;
+			counter += 1;
+		}
+
+		// display the stats if user presses button 2 outside of the game
+		if(log2(edge_capture) == 1) {
+			display_seven_time(avg_stats);
 		}
 	}
 }
